@@ -230,23 +230,75 @@ void fill_rect(uint8_t* img, int stride, int x0,int y0,int w,int h, uint32_t col
       }
 }
 
+void get_qp_distro(const de265_image* img, int* qp_distro)
+{
+  const seq_parameter_set& sps = img->get_sps();
+  int minCbSize = sps.MinCbSizeY;
+
+  // init QP distro
+  for (int q=0;q<100;q++)
+    qp_distro[q] = 0;
+
+  // update QP distro
+  for (int y0=0;y0<sps.PicHeightInMinCbsY;y0++)
+    {
+    for (int x0=0;x0<sps.PicWidthInMinCbsY;x0++)
+      {
+        int log2CbSize = img->get_log2CbSize_cbUnits(x0,y0);
+        if (log2CbSize==0) {
+          continue;
+        }
+
+        int xb = x0*minCbSize;
+        int yb = y0*minCbSize;
+
+        int CbSize = 1<<log2CbSize;
+        int q = img->get_QPY(xb,yb);
+        if (q < 0 || q >= 100) {
+          fprintf(stderr, "error: q: %d\n",q);
+          continue;
+        }
+        // consider whether to normalize the QP distro by CB size
+        //qp_distro[q] += (CbSize*CbSize);
+        // provide per-block QP output
+        qp_distro[q] += 1;
+      }
+    }
+  return;
+}
 
 void draw_QuantPY_block(const de265_image* srcimg,uint8_t* img,int stride,
-                        int x0,int y0, int w,int h, int pixelSize)
+                        int x0,int y0, int w,int h, int pixelSize,
+                        int p10, int p25, int p50, int p75, int p90)
 {
   int q = srcimg->get_QPY(x0,y0);
 
-  const int MIN_DRAW_Q = 20;
-  const int MAX_DRAW_Q = 40;
+  if (q < p10) {  // best quality
+    //printf("-->id: %i x0: %i y0: %i qp: %i p10: %i\n", srcimg->get_ID(), x0, y0, q, p10);
+    tint_rect(img,stride, x0,y0,w,h, 0x00ff00 /* green */, pixelSize);
+  } else if (q < p25) {  // better quality
+    //printf("---->id: %i x0: %i y0: %i qp: %i p25: %i\n", srcimg->get_ID(), x0, y0, q, p25);
+    tint_rect(img,stride, x0,y0,w,h, 0x007f00 /* light green */, pixelSize);
+  } else if (q > p90) {  // worst quality
+    //printf("-->id: %i x0: %i y0: %i qp: %i p90: %i\n", srcimg->get_ID(), x0, y0, q, p90);
+    tint_rect(img,stride, x0,y0,w,h, 0xff0000 /* red */, pixelSize);
+  } else if (q > p75) {  // worse quality
+    //printf("---->id: %i x0: %i y0: %i qp: %i p75: %i\n", srcimg->get_ID(), x0, y0, q, p75);
+    tint_rect(img,stride, x0,y0,w,h, 0x7f0000 /* red */, pixelSize);
+  } else {
+    // make sure QP values are in the valid range ([0, 51])
+    const int MIN_DRAW_Q = 0;
+    const int MAX_DRAW_Q = 51;
+    //if (q<MIN_DRAW_Q) q=MIN_DRAW_Q;
+    //if (q>MAX_DRAW_Q) q=MAX_DRAW_Q;
 
-  if (q<MIN_DRAW_Q) q=MIN_DRAW_Q;
-  if (q>MAX_DRAW_Q) q=MAX_DRAW_Q;
+    // select a color proportional to the QP value
+    float f = ((float)q-MIN_DRAW_Q)/(MAX_DRAW_Q-MIN_DRAW_Q);
+    uint32_t col = 0xff * f;
+    col = col | (col<<8) | (col<<16);
 
-  float f = ((float)q-MIN_DRAW_Q)/(MAX_DRAW_Q-MIN_DRAW_Q);
-  uint32_t col = 0xFF * f;
-  col = col | (col<<8) | (col<<16);
-
-  fill_rect(img,stride, x0,y0,w,h, col, pixelSize);
+    //tint_rect(img,stride, x0,y0,w,h, col, pixelSize);
+  }
 }
 
 
@@ -317,6 +369,70 @@ void draw_tree_grid(const de265_image* srcimg, uint8_t* img, int stride,
   const seq_parameter_set& sps = srcimg->get_sps();
   int minCbSize = sps.MinCbSizeY;
 
+  int p10 = 0, p25 = 0, p50 = 0, p75 = 0, p90 = 0;
+
+  if (what == QuantP_Y) {
+    // calculate qp max and min
+    int qp_distro[100];
+    get_qp_distro(srcimg, qp_distro);
+
+#if 1
+    // dump qp distro
+    bool first_nonzero = false;
+    int lowest_nonzero = 0;
+    int highest_nonzero = 0;
+    for (int qp=0;qp<100;qp++)
+      {
+      if (qp_distro[qp] != 0 && !first_nonzero)
+        {
+        first_nonzero = true;
+        lowest_nonzero = qp;
+        }
+      if (qp_distro[qp] != 0)
+        highest_nonzero = qp;
+      }
+    printf("id: %i qp_distro[%i:%i] { ", srcimg->get_ID(), lowest_nonzero, highest_nonzero);
+    for (int qp=0;qp<100;qp++)
+      {
+      if (qp < lowest_nonzero || qp > highest_nonzero)
+        continue;
+      printf("%d ", qp_distro[qp]);
+      }
+    printf("}");
+#endif
+
+    // get the p10, p25, p50, p75, and p90 QP values
+    int qp_distro_len = 0;
+    for (int qp = 0; qp < 100; ++qp) {
+      qp_distro_len += qp_distro[qp];
+    }
+    int cum_values = 0;
+    int cv10 = qp_distro_len / 10;
+    int cv25 = qp_distro_len / 4;
+    int cv50 = qp_distro_len / 2;
+    int cv75 = qp_distro_len * 3/ 4;
+    int cv90 = qp_distro_len * 9 / 10;
+    for (int qp = 0; qp < 100; ++qp) {
+      if (cum_values <= cv10 && cv10 <= cum_values + qp_distro[qp]) {
+        p10 = qp;
+      }
+      if (cum_values <= cv25 && cv25 <= cum_values + qp_distro[qp]) {
+        p25 = qp;
+      }
+      if (cum_values <= cv50 && cv50 <= cum_values + qp_distro[qp]) {
+        p50 = qp;
+      }
+      if (cum_values <= cv75 && cv75 <= cum_values + qp_distro[qp]) {
+        p75 = qp;
+      }
+      if (cum_values <= cv90 && cv90 <= cum_values + qp_distro[qp]) {
+        p90 = qp;
+      }
+      cum_values += qp_distro[qp];
+    }
+  }
+  printf(" { p10: %i, p25: %i, p50: %i, p75: %i, p90: %i }\n", p10, p25, p50, p75, p90);
+
   for (int y0=0;y0<sps.PicHeightInMinCbsY;y0++)
     for (int x0=0;x0<sps.PicWidthInMinCbsY;x0++)
       {
@@ -340,7 +456,7 @@ void draw_tree_grid(const de265_image* srcimg, uint8_t* img, int stride,
           draw_PB_block(srcimg,img,stride,xb,yb,CbSize,CbSize, what,color,pixelSize);
         }
         else if (what == QuantP_Y) {
-          draw_QuantPY_block(srcimg,img,stride,xb,yb,CbSize,CbSize,pixelSize);
+          draw_QuantPY_block(srcimg,img,stride,xb,yb,CbSize,CbSize,pixelSize,p10,p25,p50,p75,p90);
         }
         else if (what == Partitioning_PB ||
                  what == PBMotionVectors) {
