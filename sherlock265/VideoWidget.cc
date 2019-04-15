@@ -50,7 +50,7 @@ VideoWidget::~VideoWidget()
 
 QSize VideoWidget::sizeHint() const
 {
-  return QSize(352,288);
+  return QSize(1280, 720);
 }
 
 
