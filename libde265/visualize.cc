@@ -269,36 +269,55 @@ void get_qp_distro(const de265_image* img, int* qp_distro)
 
 void draw_QuantPY_block(const de265_image* srcimg,uint8_t* img,int stride,
                         int x0,int y0, int w,int h, int pixelSize,
-                        int p10, int p25, int p50, int p75, int p90)
+                        int p10, int p25, int p50, int p75, int p90,
+                        float avg, float stddev)
 {
-  int q = srcimg->get_QPY(x0,y0);
+  int qp = srcimg->get_QPY(x0,y0);
 
-  if (q < p10) {  // best quality
-    //printf("-->id: %i x0: %i y0: %i qp: %i p10: %i\n", srcimg->get_ID(), x0, y0, q, p10);
+  int sd1left = (int)(avg - stddev);
+  int sd1right = (int)(avg + stddev);
+  int sd2left = (int)(avg - 2.0 * stddev);
+  int sd2right = (int)(avg + 2.0 * stddev);
+
+#define USE_PERCENTILES
+#ifdef USE_PERCENTILES
+  if (qp < p10) {  // best quality
+    //printf("-->id: %i x0: %i y0: %i qp: %i <p10: %i\n", srcimg->get_ID(), x0, y0, qp, p10);
     tint_rect(img,stride, x0,y0,w,h, 0x00ff00 /* green */, pixelSize);
-  } else if (q < p25) {  // better quality
-    //printf("---->id: %i x0: %i y0: %i qp: %i p25: %i\n", srcimg->get_ID(), x0, y0, q, p25);
-    tint_rect(img,stride, x0,y0,w,h, 0x007f00 /* light green */, pixelSize);
-  } else if (q > p90) {  // worst quality
-    //printf("-->id: %i x0: %i y0: %i qp: %i p90: %i\n", srcimg->get_ID(), x0, y0, q, p90);
+  } else if (qp == p10) {  // second best quality
+    //printf("-->id: %i x0: %i y0: %i qp: %i =p10: %i\n", srcimg->get_ID(), x0, y0, qp, p10);
+    tint_rect(img,stride, x0,y0,w,h, 0x00a000 /* light green */, pixelSize);
+  } else if (qp < p25) {  // better quality
+    //printf("---->id: %i x0: %i y0: %i qp: %i p25: %i\n", srcimg->get_ID(), x0, y0, qp, p25);
+    tint_rect(img,stride, x0,y0,w,h, 0x005000 /* light green */, pixelSize);
+  } else if (qp > p90) {  // worst quality
+    //printf("-->id: %i x0: %i y0: %i qp: %i >p90: %i\n", srcimg->get_ID(), x0, y0, qp, p90);
     tint_rect(img,stride, x0,y0,w,h, 0xff0000 /* red */, pixelSize);
-  } else if (q > p75) {  // worse quality
-    //printf("---->id: %i x0: %i y0: %i qp: %i p75: %i\n", srcimg->get_ID(), x0, y0, q, p75);
-    tint_rect(img,stride, x0,y0,w,h, 0x7f0000 /* red */, pixelSize);
+  } else if (qp == p90) {  // second worst quality
+    //printf("-->id: %i x0: %i y0: %i qp: %i =p90: %i\n", srcimg->get_ID(), x0, y0, qp, p90);
+    tint_rect(img,stride, x0,y0,w,h, 0x800000 /* light red */, pixelSize);
+  } else if (qp > p75) {  // worse quality
+    //printf("---->id: %i x0: %i y0: %i qp: %i p75: %i\n", srcimg->get_ID(), x0, y0, qp, p75);
+    tint_rect(img,stride, x0,y0,w,h, 0x500000 /* light red */, pixelSize);
   } else {
-    // make sure QP values are in the valid range ([0, 51])
-    const int MIN_DRAW_Q = 0;
-    const int MAX_DRAW_Q = 51;
-    //if (q<MIN_DRAW_Q) q=MIN_DRAW_Q;
-    //if (q>MAX_DRAW_Q) q=MAX_DRAW_Q;
-
-    // select a color proportional to the QP value
-    float f = ((float)q-MIN_DRAW_Q)/(MAX_DRAW_Q-MIN_DRAW_Q);
-    uint32_t col = 0xff * f;
-    col = col | (col<<8) | (col<<16);
-
-    //tint_rect(img,stride, x0,y0,w,h, col, pixelSize);
+    // values are in the p25-p75 range
+    //printf("-->id: %i x0: %i y0: %i qp: %i p50\n", srcimg->get_ID(), x0, y0, qp);
+    0;
   }
+#else
+  if (qp < sd2left) {  // best quality
+    tint_rect(img,stride, x0,y0,w,h, 0x00ff00 /* green */, pixelSize);
+  } else if (qp < sd1left) {  // second best quality
+    tint_rect(img,stride, x0,y0,w,h, 0x008000 /* light green */, pixelSize);
+  } else if (qp > sd2right) {  // worst quality
+    tint_rect(img,stride, x0,y0,w,h, 0xff0000 /* red */, pixelSize);
+  } else if (qp > sd1right) {  // second worst quality
+    tint_rect(img,stride, x0,y0,w,h, 0x800000 /* light red */, pixelSize);
+  } else {
+    // values are in the middle range
+    0;
+  }
+#endif  // USE_PERCENTILES
 }
 
 
@@ -370,6 +389,9 @@ void draw_tree_grid(const de265_image* srcimg, uint8_t* img, int stride,
   int minCbSize = sps.MinCbSizeY;
 
   int p10 = 0, p25 = 0, p50 = 0, p75 = 0, p90 = 0;
+  float avg = 0.0;
+  float var = 0.0;
+  float stddev = 0.0;
 
   if (what == QuantP_Y) {
     // calculate qp max and min
@@ -430,8 +452,21 @@ void draw_tree_grid(const de265_image* srcimg, uint8_t* img, int stride,
       }
       cum_values += qp_distro[qp];
     }
+    // get avg and stddev
+    int num_samples = 0;
+    for (int qp = 0; qp < 100; ++qp) {
+      num_samples += qp_distro[qp];
+      avg += qp_distro[qp] * qp;
+    }
+    avg /= num_samples;
+    for (int qp = 0; qp < 100; ++qp) {
+      var += qp_distro[qp] * (qp - avg) * (qp - avg);
+    }
+    var /= num_samples;
+    stddev = sqrt(var);
+
+    printf(" { p10: %i, p25: %i, p50: %i, p75: %i, p90: %i } {avg: %f stddev: %f } \n", p10, p25, p50, p75, p90, avg, stddev);
   }
-  printf(" { p10: %i, p25: %i, p50: %i, p75: %i, p90: %i }\n", p10, p25, p50, p75, p90);
 
   for (int y0=0;y0<sps.PicHeightInMinCbsY;y0++)
     for (int x0=0;x0<sps.PicWidthInMinCbsY;x0++)
@@ -456,7 +491,7 @@ void draw_tree_grid(const de265_image* srcimg, uint8_t* img, int stride,
           draw_PB_block(srcimg,img,stride,xb,yb,CbSize,CbSize, what,color,pixelSize);
         }
         else if (what == QuantP_Y) {
-          draw_QuantPY_block(srcimg,img,stride,xb,yb,CbSize,CbSize,pixelSize,p10,p25,p50,p75,p90);
+          draw_QuantPY_block(srcimg,img,stride,xb,yb,CbSize,CbSize,pixelSize,p10,p25,p50,p75,p90,avg,stddev);
         }
         else if (what == Partitioning_PB ||
                  what == PBMotionVectors) {
