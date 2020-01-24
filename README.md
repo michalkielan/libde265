@@ -89,21 +89,20 @@ Additional logging information can be turned on and off using these `./configure
 </pre>
 
 
-Build using cmake
-=================
-
-cmake scripts to build libde265 and the sample scripts `dec265` and `enc265` are
-included and can be compiled using these commands:
+# Build
 
 ```
-mkdir build
-cd build
-cmake ..
-make
+$ git clone http://github.com/chemag/libde265
+$ cd libde265
+$ ./autogen.sh
+$ ./configure
+$ make -j 8
 ```
 
-See the [cmake documentation](http://www.cmake.org) for further information on
-using cmake on other platforms.
+# Extra Tools
+
+The [tools](tools/) directory contains a series of handy tools, including [qpextract](README.qpextract.md).
+
 
 
 Prebuilt binaries
