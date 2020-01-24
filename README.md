@@ -10,7 +10,7 @@ a simple integration into other software.
 
 libde265 supports WPP and tile-based multithreading and includes SSE optimizations.
 The decoder includes all features of the Main profile and correctly decodes almost all
-conformance streams (see [[wiki page](https://github.com/strukturag/libde265/wiki/Decoder-conformance)]).
+conformance streams (see [wiki page](https://github.com/strukturag/libde265/wiki/Decoder-conformance)).
 
 A list of supported features are available in the [wiki](https://github.com/strukturag/libde265/wiki/Supported-decoding-features).
 
@@ -91,6 +91,14 @@ Additional logging information can be turned on and off using these `./configure
 
 # Build
 
+If you are using MacOS, make sure you install `automake`, `cmake`, and `libtool`:
+```
+$ brew install automake
+$ brew install cmake
+$ brew install libtool
+```
+
+Build all the binaries:
 ```
 $ git clone http://github.com/chemag/libde265
 $ cd libde265
